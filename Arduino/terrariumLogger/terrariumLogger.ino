@@ -3,11 +3,13 @@
 #include <Wire.h>
 #include <RTClib.h>
 #include <dht.h>
-
+#include <MQ135.h>
 
 dht DHT;
 SdFat sd;
-SdFile myFile;
+SdFile outFile;
+
+MQ135 gasSensor = MQ135(A2);
 
 RTC_DS1307 rtc;
 
@@ -15,39 +17,35 @@ const int chipSelect = 10;
 const int LDRPin = A0;
 const int DHT22_PIN = 7;
 
-void writeLog(float temperature, float humidity, int LDRvalue, int oxygen) {
+char outputData [120] = "";
+
+void writeLog(int temperature, int humidity, int LDRvalue, int oxygenPPM) {
   DateTime now = rtc.now();
 
-  char outputData [50] = "";
-  char t[7];
-  char h[7];
-
-  dtostrf(temperature, 2, 2, t);
-  dtostrf(humidity, 2, 2, h);
-
-  sprintf(outputData, "%04d/%02d/%02d %02d:%02d:%02d, %04s, %04s, %04d, %04d", now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second(), t, h, LDRvalue, temperature, oxygen);
+  sprintf(outputData, "%04d/%02d/%02d %02d:%02d:%02d, %8d, %8d, %8d, %8d", now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second(), temperature, humidity, LDRvalue, oxygenPPM);
 
   if (!sd.begin(chipSelect, SPI_HALF_SPEED)) sd.initErrorHalt();
 
-  if (!myFile.open("terr.csv", O_RDWR | O_CREAT | O_AT_END)) {
+  if (!outFile.open("terr.csv", O_RDWR | O_CREAT | O_AT_END)) {
     sd.errorHalt("Opening terrarium.csv for write failed");
   }
 
-  myFile.println(outputData);
+  Serial.println(outputData);
+  outFile.println(outputData);
 
-  myFile.close();
+  outFile.close();
 }
 
 void writeErr(String errorMsg) {
 
   if (!sd.begin(chipSelect, SPI_HALF_SPEED)) sd.initErrorHalt();
 
-  if (!myFile.open("error.log", O_RDWR | O_CREAT | O_AT_END)) {
+  if (!outFile.open("error.log", O_RDWR | O_CREAT | O_AT_END)) {
     sd.errorHalt("Opening error.log for write failed");
   }
 
-  myFile.println(errorMsg);
-  myFile.close();
+  outFile.println(errorMsg);
+  outFile.close();
 }
 
 int getLDRValue() {
@@ -61,6 +59,8 @@ void refreshDHTSensor() {
   uint32_t stop = micros();
 
   switch (chk) {
+    case DHTLIB_OK:
+      break;
     case DHTLIB_ERROR_CHECKSUM:
       writeErr("Checksum error");
       break;
@@ -90,7 +90,17 @@ float getHumidValue() {
   return DHT.humidity;
 }
 
+float getO2PPM() {
+  return gasSensor.getPPM();
+}
+
+float rzero() {
+  return gasSensor.getRZero();
+}
+
 void setup() {
+  Serial.begin(115200);
+
   if (! rtc.begin()) {
     writeErr("Couldn't find RTC");
   }
@@ -100,9 +110,9 @@ void setup() {
 }
 
 void loop() {
-  delay(10000);
+  delay(2000);
 
   refreshDHTSensor();
 
-  writeLog( getTempValue(), getHumidValue(), getLDRValue(), 0 );
+  writeLog( (int) getTempValue(), (int) getHumidValue(), getLDRValue(), (int) getO2PPM());
 }
